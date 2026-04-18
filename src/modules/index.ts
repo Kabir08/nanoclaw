@@ -15,4 +15,7 @@
  */
 import './interactive/index.js';
 import './approvals/index.js';
+import './scheduling/index.js';
+import './permissions/index.js';
+import './agent-to-agent/index.js';
 
