@@ -20,6 +20,7 @@ import type { AgentProvider, AgentQuery, ProviderEvent, ProviderOptions, QueryIn
 import {
   type AppServer,
   type JsonRpcNotification,
+  STALE_THREAD_RE,
   attachCodexAutoApproval,
   createCodexConfigOverrides,
   initializeCodexAppServer,
@@ -40,13 +41,6 @@ const COMPACT_THRESHOLD = 40_000;
 
 /** Hard ceiling for a single turn. Guards against app-server wedging. */
 const TURN_TIMEOUT_MS = 5 * 60 * 1000;
-
-/**
- * Errors that indicate the stored thread ID is unusable — typically
- * because the app-server has no memory of it (thread transcript was
- * deleted, server was wiped, ID is from a different codex version).
- */
-const STALE_THREAD_RE = /thread\s+not\s+found|unknown\s+thread|thread[_\s]id|no such thread/i;
 
 // ── System-prompt assembly ──────────────────────────────────────────────────
 // Codex's app-server doesn't expand Claude Code's `@-import` syntax in
