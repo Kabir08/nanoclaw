@@ -185,7 +185,26 @@ We don't want configuration sprawl. Every user should customize NanoClaw so that
 
 **Can I use third-party or open-source models?**
 
-Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
+Yes. NanoClaw supports Anthropic-compatible model endpoints and proxy-backed local backends. Set these environment variables in your `.env` file:
+
+```bash
+MODEL_PROVIDER=anthropic
+MODEL_BASE_URL=https://your-api-endpoint.com
+MODEL_NAME=your-model-name
+MODEL_AUTH_SCHEME=api-key
+MODEL_API_KEY=your-token-here
+```
+
+For a local llama.cpp shim, use:
+
+```bash
+MODEL_PROVIDER=llama.cpp
+MODEL_BASE_URL=http://127.0.0.1:8080
+MODEL_NAME=llama3.1
+MODEL_AUTH_SCHEME=none
+```
+
+These aliases still work too:
 
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
@@ -196,8 +215,9 @@ This allows you to use:
 - Local models via [Ollama](https://ollama.ai) with an API proxy
 - Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
 - Custom model deployments with Anthropic-compatible APIs
+- Local llama.cpp backends when fronted by an Anthropic-compatible shim or proxy
 
-Note: The model must support the Anthropic API format for best compatibility.
+Note: the container runtime still speaks the Anthropic API shape, so direct OpenAI-only endpoints need a compatibility layer.
 
 **How do I debug issues?**
 

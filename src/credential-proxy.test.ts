@@ -49,14 +49,52 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let lastUpstreamPath: string;
+  let lastUpstreamBody: string;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
+    lastUpstreamPath = '';
+    lastUpstreamBody = '';
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
+      lastUpstreamPath = req.url || '';
+
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => {
+        lastUpstreamBody = Buffer.concat(chunks).toString();
+
+        if (lastUpstreamPath === '/v1/chat/completions') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              id: 'chatcmpl-test',
+              model: 'llama3.1',
+              choices: [
+                {
+                  index: 0,
+                  message: {
+                    role: 'assistant',
+                    content: 'Hello from llama.cpp',
+                  },
+                  finish_reason: 'stop',
+                },
+              ],
+              usage: {
+                prompt_tokens: 12,
+                completion_tokens: 4,
+                total_tokens: 16,
+              },
+            }),
+          );
+          return;
+        }
+
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
     });
     await new Promise<void>((resolve) =>
       upstreamServer.listen(0, '127.0.0.1', resolve),
@@ -73,6 +111,16 @@ describe('credential-proxy', () => {
   async function startProxy(env: Record<string, string>): Promise<number> {
     Object.assign(mockEnv, env, {
       ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    return (proxyServer.address() as AddressInfo).port;
+  }
+
+  async function startProxyWithCustomBaseUrl(
+    env: Record<string, string>,
+  ): Promise<number> {
+    Object.assign(mockEnv, env, {
+      MODEL_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
     });
     proxyServer = await startCredentialProxy(0);
     return (proxyServer.address() as AddressInfo).port;
@@ -141,6 +189,78 @@ describe('credential-proxy', () => {
 
     expect(lastUpstreamHeaders['x-api-key']).toBe('temp-key-from-exchange');
     expect(lastUpstreamHeaders['authorization']).toBeUndefined();
+  });
+
+  it('supports MODEL_BASE_URL and bearer auth translation', async () => {
+    proxyPort = await startProxyWithCustomBaseUrl({
+      MODEL_AUTH_SCHEME: 'bearer',
+      MODEL_AUTH_TOKEN: 'bearer-model-token',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': 'placeholder',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['authorization']).toBe(
+      'Bearer bearer-model-token',
+    );
+    expect(lastUpstreamHeaders['x-api-key']).toBeUndefined();
+  });
+
+  it('translates Anthropic messages into llama.cpp chat completions', async () => {
+    proxyPort = await startProxyWithCustomBaseUrl({
+      MODEL_PROVIDER: 'llama.cpp',
+      MODEL_NAME: 'llama3.1',
+      MODEL_AUTH_SCHEME: 'none',
+    });
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': 'placeholder',
+        },
+      },
+      JSON.stringify({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 128,
+        messages: [{ role: 'user', content: 'Say hello' }],
+      }),
+    );
+
+    expect(lastUpstreamPath).toBe('/v1/chat/completions');
+    expect(lastUpstreamHeaders['authorization']).toBeUndefined();
+
+    const upstreamBody = JSON.parse(lastUpstreamBody) as {
+      model: string;
+      messages: Array<{ role: string; content: string }>;
+      stream: boolean;
+    };
+    expect(upstreamBody.model).toBe('llama3.1');
+    expect(upstreamBody.stream).toBe(false);
+    expect(upstreamBody.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'user', content: 'Say hello' }),
+      ]),
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    expect(res.body).toContain('event: message_start');
+    expect(res.body).toContain('Hello from llama.cpp');
+    expect(res.body).toContain('event: message_stop');
   });
 
   it('strips hop-by-hop headers', async () => {

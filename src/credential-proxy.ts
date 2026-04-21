@@ -1,6 +1,6 @@
 /**
  * Credential proxy for container isolation.
- * Containers connect here instead of directly to the Anthropic API.
+ * Containers connect here instead of directly to the upstream model API.
  * The proxy injects real credentials so containers never see them.
  *
  * Two auth modes:
@@ -14,8 +14,13 @@ import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
 
-import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+import { handleLlamaCppAnthropicRequest } from './llama-cpp-shim.js';
+import {
+  detectContainerAuthMode,
+  readModelBackendEnv,
+  resolveModelBackendSettings,
+} from './model-backend.js';
 
 export type AuthMode = 'api-key' | 'oauth';
 
@@ -27,20 +32,10 @@ export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
 ): Promise<Server> {
-  const secrets = readEnvFile([
-    'ANTHROPIC_API_KEY',
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_BASE_URL',
-  ]);
-
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
-
-  const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-  );
+  const secrets = readModelBackendEnv();
+  const { provider, upstreamUrl, authScheme, modelName, apiKey, bearerToken } =
+    resolveModelBackendSettings(secrets);
+  const authMode: AuthMode = detectContainerAuthMode(secrets);
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
@@ -50,6 +45,28 @@ export function startCredentialProxy(
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
         const body = Buffer.concat(chunks);
+
+        if (provider === 'llama.cpp') {
+          void handleLlamaCppAnthropicRequest(req, res, body, {
+            provider,
+            upstreamUrl,
+            authScheme,
+            modelName,
+            apiKey,
+            bearerToken,
+          }).catch((err) => {
+            logger.error(
+              { err, url: req.url, provider },
+              'Credential proxy llama.cpp translation error',
+            );
+            if (!res.headersSent) {
+              res.writeHead(502);
+              res.end('Bad Gateway');
+            }
+          });
+          return;
+        }
+
         const headers: Record<string, string | number | string[] | undefined> =
           {
             ...(req.headers as Record<string, string>),
@@ -63,18 +80,33 @@ export function startCredentialProxy(
         delete headers['transfer-encoding'];
 
         if (authMode === 'api-key') {
-          // API key mode: inject x-api-key on every request
+          // API key mode: inject the upstream credential on every request.
           delete headers['x-api-key'];
-          headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
+          delete headers['authorization'];
+
+          if (authScheme === 'bearer') {
+            const credential = bearerToken || apiKey;
+            if (credential) {
+              headers['authorization'] = `Bearer ${credential}`;
+            }
+          } else if (authScheme === 'api-key') {
+            const credential = apiKey || bearerToken;
+            if (credential) {
+              headers['x-api-key'] = credential;
+            }
+          }
         } else {
           // OAuth mode: replace placeholder Bearer token with the real one
           // only when the container actually sends an Authorization header
           // (exchange request + auth probes). Post-exchange requests use
           // x-api-key only, so they pass through without token injection.
-          if (headers['authorization']) {
+          if (authScheme === 'none') {
             delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
+            delete headers['x-api-key'];
+          } else if (headers['authorization']) {
+            delete headers['authorization'];
+            if (bearerToken) {
+              headers['authorization'] = `Bearer ${bearerToken}`;
             }
           }
         }
@@ -120,6 +152,6 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const secrets = readModelBackendEnv();
+  return detectContainerAuthMode(secrets);
 }

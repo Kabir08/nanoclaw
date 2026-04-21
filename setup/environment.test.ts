@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'fs';
 
 import Database from 'better-sqlite3';
+import { hasConfiguredModelBackend } from '../src/model-backend.js';
 
 /**
  * Tests for the environment check step.
@@ -76,23 +77,17 @@ describe('credentials detection', () => {
   it('detects ANTHROPIC_API_KEY in env content', () => {
     const content =
       'SOME_KEY=value\nANTHROPIC_API_KEY=sk-ant-test123\nOTHER=foo';
-    const hasCredentials =
-      /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(content);
-    expect(hasCredentials).toBe(true);
+    expect(hasConfiguredModelBackend(content)).toBe(true);
   });
 
-  it('detects CLAUDE_CODE_OAUTH_TOKEN in env content', () => {
-    const content = 'CLAUDE_CODE_OAUTH_TOKEN=token123';
-    const hasCredentials =
-      /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(content);
-    expect(hasCredentials).toBe(true);
+  it('detects MODEL_BASE_URL in env content', () => {
+    const content = 'MODEL_BASE_URL=http://127.0.0.1:8080';
+    expect(hasConfiguredModelBackend(content)).toBe(true);
   });
 
-  it('returns false when no credentials', () => {
+  it('returns false when no backend settings', () => {
     const content = 'ASSISTANT_NAME="Andy"\nOTHER=foo';
-    const hasCredentials =
-      /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(content);
-    expect(hasCredentials).toBe(false);
+    expect(hasConfiguredModelBackend(content)).toBe(false);
   });
 });
 

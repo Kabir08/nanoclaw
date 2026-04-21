@@ -60,6 +60,8 @@ interface SDKUserMessage {
   session_id: string;
 }
 
+type AgentProvider = 'anthropic' | 'llama.cpp';
+
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
@@ -116,6 +118,49 @@ async function readStdin(): Promise<string> {
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+
+function resolveAgentProvider(): AgentProvider {
+  const value = process.env.MODEL_PROVIDER?.trim().toLowerCase();
+  if (value === 'llama.cpp' || value === 'llama-cpp' || value === 'llamacpp' || value === 'llama' || value === 'local') {
+    return 'llama.cpp';
+  }
+  return 'anthropic';
+}
+
+function resolveModelName(): string | undefined {
+  const value = process.env.MODEL_NAME?.trim();
+  return value || undefined;
+}
+
+function buildSystemPrompt(
+  provider: AgentProvider,
+  globalClaudeMd: string | undefined,
+  assistantName?: string,
+): string | { type: 'preset'; preset: 'claude_code'; append?: string } | undefined {
+  if (provider === 'anthropic') {
+    return globalClaudeMd
+      ? {
+          type: 'preset' as const,
+          preset: 'claude_code' as const,
+          append: globalClaudeMd,
+        }
+      : undefined;
+  }
+
+  const assistantLabel = assistantName || 'Assistant';
+  const localPrompt = [
+    `You are ${assistantLabel}, the NanoClaw agent running inside an isolated container.`,
+    'Use the available tools to inspect files, edit code, reason about the workspace, and send progress updates when helpful.',
+    'Be direct, prefer concrete actions, and return a concise final answer when the task is done.',
+    'Keep work inside the mounted project and group directories unless the user explicitly asks otherwise.',
+  ];
+
+  if (globalClaudeMd) {
+    localPrompt.push('', globalClaudeMd);
+  }
+
+  return localPrompt.join('\n');
+}
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
@@ -435,6 +480,10 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  const provider = resolveAgentProvider();
+  const modelName = resolveModelName();
+  const model = modelName || (provider === 'llama.cpp' ? 'llama.cpp' : undefined);
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -442,13 +491,12 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: globalClaudeMd,
-          }
-        : undefined,
+      systemPrompt: buildSystemPrompt(
+        provider,
+        globalClaudeMd,
+        containerInput.assistantName,
+      ),
+      model,
       allowedTools: [
         'Bash',
         'Read',

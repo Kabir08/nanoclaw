@@ -14,11 +14,11 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
-
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { resolveModelBackendSettings } from './model-backend.js';
 import {
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
@@ -29,7 +29,6 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -248,9 +247,17 @@ function buildContainerArgs(
   containerName: string,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const modelBackend = resolveModelBackendSettings();
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Thread backend context into the container so the agent runner can adapt
+  // its prompt and model selection without exposing upstream secrets.
+  args.push('-e', `MODEL_PROVIDER=${modelBackend.provider}`);
+  if (modelBackend.modelName) {
+    args.push('-e', `MODEL_NAME=${modelBackend.modelName}`);
+  }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
