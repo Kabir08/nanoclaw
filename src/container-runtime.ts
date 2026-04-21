@@ -8,7 +8,7 @@ import os from 'os';
 import { logger } from './logger.js';
 
 /** The container runtime binary name. */
-export const CONTAINER_RUNTIME_BIN = 'docker';
+export const CONTAINER_RUNTIME_BIN = 'podman';
 
 /** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
@@ -58,10 +58,10 @@ export function ensureContainerRuntimeRunning(): void {
       '║  Agents cannot run without a container runtime. To fix:        ║',
     );
     console.error(
-      '║  1. Ensure Docker is installed and running                     ║',
+      '║  1. Ensure Podman is installed and running                     ║',
     );
     console.error(
-      '║  2. Run: docker info                                           ║',
+      '║  2. Run: podman info                                           ║',
     );
     console.error(
       '║  3. Restart NanoClaw                                           ║',
