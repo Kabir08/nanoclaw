@@ -1,7 +1,7 @@
 {
-  "name": "nanoclaw",
+  "name": "agent-harbor",
   "version": "1.2.53",
-  "description": "Personal Claude assistant. Lightweight, secure, customizable.",
+  "description": "Agent Harbor, a fork of NanoClaw. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
