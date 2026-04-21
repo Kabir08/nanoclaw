@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/nanoclaw-logo.png" alt="Agent Harbor" width="400">
+  <img src="assets/agent-harbour_main.png" alt="Agent Harbor" width="400">
 </p>
 
 <p align="center">
